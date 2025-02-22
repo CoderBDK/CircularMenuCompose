@@ -1,6 +1,5 @@
 package com.coderbdk.circularmenu
 
-
 import androidx.annotation.DrawableRes
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.animateIntAsState
@@ -37,10 +36,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlin.math.abs
-
+import kotlin.math.min
 
 sealed class CircularMenuIcon {
     data class Vector(val image: ImageVector) : CircularMenuIcon()
@@ -58,9 +56,6 @@ abstract class CircularMenuState(
     val colors: CircularMenuColor,
     val brushes: CircularMenuBrush
 ) {
-
-    abstract val menuButtonSize: Dp
-    abstract val menuSurfaceSize: Dp
     abstract val countMenu: Int
     abstract val angleStep: Float
 
@@ -80,13 +75,12 @@ internal class CircularMenuStateImpl(
     brushes: CircularMenuBrush
 ) : CircularMenuState(menus, colors, brushes) {
 
-    override var menuButtonSize: Dp = 24.dp
-    override var menuSurfaceSize: Dp = (48 * 3).dp
+
     override var countMenu: Int = menus.size
     override var angleStep: Float = if (countMenu > 0) 360f / countMenu else 0f
 
 
-    private var _expand: Boolean by mutableStateOf(false)
+    private var _expand: Boolean by mutableStateOf(true)
     private var _previousMenu: Int by mutableIntStateOf(0)
     private var _selectedMenu: Int by mutableIntStateOf(0)
 
@@ -134,7 +128,9 @@ fun rememberCircularMenuState(
     brushes: CircularMenuBrush = CircularMenuDefaults.brushes()
 ): CircularMenuState = remember {
     CircularMenuStateImpl(
-        menus = menus,
+        menus = menus.take(
+            min(menus.size, 7)
+        ),
         colors = colors,
         brushes = brushes
     )
@@ -149,24 +145,23 @@ fun CircularMenu(
 
     val expandValue by animateIntAsState(
         targetValue = if (state.expand) state.countMenu else 0,
-        animationSpec = tween(
-            durationMillis = if (state.expand) 300 else 100 * state.countMenu
+        animationSpec = if (state.expand) DefaultCircularMenuAnimationSpecs.expandTweenExpanded
+        else DefaultCircularMenuAnimationSpecs.expandTweenCollapsed(
+            state.countMenu
         ),
         label = "expand_value"
     )
     val expandRotationValue by animateFloatAsState(
         targetValue = if (state.expand) 0f else 180f,
-        animationSpec = tween(
-            durationMillis = 500
-        ),
+        animationSpec = DefaultCircularMenuAnimationSpecs.expandRotationTween,
         label = "expand_value"
     )
 
     val selectedValue by animateIntAsState(
         targetValue = if (state.expand) state.selectedMenu else 0,
-        animationSpec = tween(
-            durationMillis = if (abs(state.selectedMenu - state.previousMenu) == 1) 50
-            else (60 * abs(state.selectedMenu - state.previousMenu)).coerceIn(100, 500)
+        animationSpec = DefaultCircularMenuAnimationSpecs.selectedTween(
+            state.selectedMenu,
+            state.previousMenu
         ),
         label = "expand_value"
     )
@@ -180,7 +175,6 @@ fun CircularMenu(
 
         MenuOverlayContainer(
             expand = state.expand,
-            menuSurfaceSize = state.menuSurfaceSize,
             expandValue = expandValue,
             brush = state.brushes.overlayContainerBrush,
             colors = state.colors
@@ -189,7 +183,6 @@ fun CircularMenu(
         MenuIndicator(
             expand = state.expand,
             expandValue = expandValue,
-            menuButtonSize = state.menuButtonSize,
             angleStep = state.angleStep,
             selectedValue = selectedValue,
             brush = state.brushes.indicatorBrush
@@ -208,7 +201,6 @@ fun CircularMenu(
             countMenu = state.countMenu,
             expandValue = expandValue,
             selectedValue = state.selectedMenu,
-            menuButtonSize = state.menuButtonSize,
             state = state,
             angleStep = state.angleStep,
             colors = state.colors,
@@ -224,14 +216,13 @@ fun CircularMenu(
 private fun MenuOverlayContainer(
     expand: Boolean,
     expandValue: Int,
-    menuSurfaceSize: Dp,
     brush: Brush,
     colors: CircularMenuColor
 ) {
     if (expand || expandValue != 0)
         Box(
             modifier = Modifier
-                .size(menuSurfaceSize)
+                .size(MenuSurfaceSize)
                 .border(
                     width = 1.dp,
                     color = colors.overlayContainerBorderColor,
@@ -259,7 +250,6 @@ private fun MenuOverlayContainer(
 private fun MenuIndicator(
     expand: Boolean,
     expandValue: Int,
-    menuButtonSize: Dp,
     angleStep: Float,
     selectedValue: Int,
     brush: Brush
@@ -267,11 +257,11 @@ private fun MenuIndicator(
     if (expand || expandValue != 0) {
         Box(
             modifier = Modifier
-                .size(menuButtonSize + 24.dp)
+                .size(MenuIndicatorSize)
                 .rotate(angleStep * selectedValue)
                 .graphicsLayer {
-                    translationX = 48.dp.toPx()
-                    rotationZ = 45f
+                    translationX = MenuIndicatorTranslateX.toPx()
+                    rotationZ = MenuIndicatorRotationZ
                 }
                 .background(
                     brush,
@@ -294,7 +284,7 @@ private fun MenuControllerButton(
     IconButton(
         modifier = Modifier
             .rotate(expandRotationValue)
-            .size(40.dp),
+            .size(MenuControllerIconButtonSize),
         colors = IconButtonDefaults.iconButtonColors(
             containerColor = colors.controllerButtonContainerColor
         ),
@@ -316,7 +306,6 @@ private fun MenuContent(
     countMenu: Int,
     expandValue: Int,
     selectedValue: Int,
-    menuButtonSize: Dp,
     state: CircularMenuState,
     angleStep: Float,
     colors: CircularMenuColor,
@@ -328,7 +317,6 @@ private fun MenuContent(
                 MenuItem(
                     selectedValue = selectedValue,
                     index = i,
-                    menuButtonSize = menuButtonSize,
                     menus = state.menus,
                     angleStep = angleStep,
                     colors = colors,
@@ -344,19 +332,18 @@ private fun MenuContent(
 @Composable
 private fun MenuItem(
     selectedValue: Int,
-    menuButtonSize: Dp,
     angleStep: Float,
     index: Int,
     menus: List<CircularMenuItem>,
     colors: CircularMenuColor,
     onMenuSelected: (Int) -> Unit
 ) {
+
     Box(
         modifier = Modifier
-            .size(menuButtonSize)
             .rotate(angleStep * index)
             .graphicsLayer {
-                translationX = 44.dp.toPx()
+                translationX = MenuItemTranslateX.toPx()
             },
     ) {
 
@@ -370,28 +357,92 @@ private fun MenuItem(
             }
 
             is CircularMenuIcon.Vector -> {
-                IconButton(
-                    modifier = Modifier
-                        .size(menuButtonSize)
-                        .rotate(-angleStep * index),
-                    onClick = {
-                        onMenuSelected(index)
-                    }) {
-
-                    Icon(
-                        modifier = Modifier
-                            .padding(4.dp)
-                            .fillMaxSize(),
-                        imageVector = icon.image,
-                        tint = if (selectedValue == index) colors.selectedIconColor else colors.unselectedIconColor,
-                        contentDescription = "Menu Item"
-                    )
-                }
+                MenuItemVectorIcon(
+                    selectedValue = selectedValue,
+                    angleStep = angleStep,
+                    index = index,
+                    colors = colors,
+                    icon = icon,
+                    onMenuSelected = onMenuSelected
+                )
             }
 
         }
     }
 }
+
+@Composable
+fun MenuItemVectorIcon(
+    selectedValue: Int,
+    angleStep: Float,
+    index: Int,
+    colors: CircularMenuColor,
+    icon: CircularMenuIcon.Vector,
+    onMenuSelected: (Int) -> Unit
+) {
+    IconButton(
+        modifier = Modifier
+            .size(MenuItemIconButtonSize)
+            .rotate(-angleStep * index),
+        onClick = {
+            onMenuSelected(index)
+        }) {
+
+        Icon(
+            modifier = Modifier
+                .padding(4.dp)
+                .fillMaxSize(),
+            imageVector = icon.image,
+            tint = if (selectedValue == index) colors.selectedIconColor else colors.unselectedIconColor,
+            contentDescription = "Menu Item"
+        )
+    }
+}
+
+private val MenuSurfaceSize = 144.dp
+private val MenuIndicatorSize = 48.dp
+private val MenuControllerIconButtonSize = 40.dp
+private val MenuItemIconButtonSize = 24.dp
+
+private val MenuIndicatorTranslateX = 48.dp
+private val MenuItemTranslateX = 44.dp
+private const val MenuIndicatorRotationZ = 45f
+
+internal object DefaultCircularMenuAnimationSpecs {
+    private const val SELECTED_DURATION_MILLIS_MIN = 100
+    private const val SELECTED_DURATION_MILLIS_MAX = 500
+    private const val SELECTED_DURATION_MULTIPLIER = 60
+    private const val EXPAND_ROTATION_DURATION_MILLIS = 500
+    private const val EXPAND_DURATION_MILLIS_EXPANDED = 300
+    private const val EXPAND_DURATION_MILLIS_COLLAPSED = 100
+    private const val SELECTED_DURATION_MILLIS_SINGLE_STEP = 50
+
+    val expandTweenExpanded = tween<Int>(
+        durationMillis = EXPAND_DURATION_MILLIS_EXPANDED
+    )
+
+    val expandTweenCollapsed = { countMenu: Int ->
+        tween<Int>(
+            durationMillis = EXPAND_DURATION_MILLIS_COLLAPSED * countMenu
+        )
+    }
+
+    val expandRotationTween = tween<Float>(
+        durationMillis = EXPAND_ROTATION_DURATION_MILLIS
+    )
+
+    val selectedTween = { selectedMenu: Int, previousMenu: Int ->
+        val differences = abs(selectedMenu - previousMenu)
+        tween<Int>(
+            durationMillis = if (differences == 1) SELECTED_DURATION_MILLIS_SINGLE_STEP
+            else (SELECTED_DURATION_MULTIPLIER * differences).coerceIn(
+                SELECTED_DURATION_MILLIS_MIN,
+                SELECTED_DURATION_MILLIS_MAX
+            )
+        )
+    }
+}
+
 
 data class CircularMenuColor(
     val overlayContainerBorderColor: Color,
